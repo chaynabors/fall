@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "gungame",
+    "gungame_core",
+    "gungame_mappy",
+]

@@ -1,0 +1,8 @@
+[package]
+name = "gungame"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+
+[dependencies]
+gungame_core = { path = "../gungame_core" }
