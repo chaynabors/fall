@@ -17,6 +17,7 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let map = Map::from_file(args.map);
+    let map = Map::from_file(args.map).map_err(|e| format!("failed to parse map: {e}"));
+    println!("{map:#?}");
     //let dir = args.map
 }
