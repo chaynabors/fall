@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.53"
 clap = { version = "3.0.14", features = ["derive"] }
+gungame_core = { path = "../gungame_core" }
+nalgebra = "0.30.1"
 nom = "7.1.0"

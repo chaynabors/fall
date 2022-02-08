@@ -6,46 +6,45 @@ use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
+use anyhow::Error;
+use anyhow::Result;
 use nom::error::VerboseError;
-use nom::error::convert_error;
-
-use crate::Result;
-use crate::error::Error;
 
 use entity::Entity;
+use nom::error::convert_error;
 
 #[derive(Debug, Default)]
-pub struct Map(pub Vec<Entity>);
+pub struct Map {
+    pub entities: Vec<Entity>
+}
 
 impl Map {
-    pub fn from_file<P>(path: P) -> Result<Self> where P: AsRef<Path> {
-        Map::from_str(&fs::read_to_string(path)?)
+    pub fn load<P>(path: P) -> Result<Self> where P: AsRef<Path> {
+        fs::read_to_string(path)?.parse()
     }
 }
 
 impl FromStr for Map {
     type Err = Error;
 
-    fn from_str<'a>(s: &str) -> Result<Self> {
-        match parser::parse_map::<VerboseError<&str>>(s) {
-            Ok((_remainder, map)) => Ok(map),
-            Err(nom::Err::Error(e))
-            | Err(nom::Err::Failure(e)) => {
-              Err(Error::ParseError(convert_error(s, e)))
-            },
-            Err(nom::Err::Incomplete(needed)) => {
-                Err(Error::IncompleteData(format!("{needed:?}")))
-            }
-          }
+    fn from_str(s: &str) -> Result<Self> {
+        parser::parse_map::<VerboseError<&str>>(s)
+            .map_err(|e| anyhow::anyhow!(convert_error(s, e)))
     }
 }
 
 mod parser {
+    use nalgebra::Vector3;
+    use nom::Finish;
     use nom::IResult;
+    use nom::branch::alt;
+    use nom::bytes::complete::tag;
     use nom::bytes::complete::take_until;
     use nom::character::complete::char;
-    use nom::character::complete::multispace0;
+    use nom::character::complete::multispace1;
+    use nom::character::complete::not_line_ending;
     use nom::combinator::map;
+    use nom::combinator::value;
     use nom::error::ContextError;
     use nom::error::ParseError;
     use nom::error::context;
@@ -61,8 +60,22 @@ mod parser {
     use super::entity::Entity;
     use super::plane::Plane;
 
-    fn ws<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
-        multispace0(i)
+    enum Token<'a> {
+        LBrace,
+        RBrace,
+        LParen,
+        RParen,
+        String(&'a str),
+        Num(f32),
+        Tex(&'a str),
+    }
+
+    fn comment<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
+        preceded(tag("//"), not_line_ending)(i)
+    }
+
+    fn ws<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, (), E> {
+        value((), many0(alt((multispace1, comment))))(i)
     }
 
     fn string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
@@ -77,12 +90,12 @@ mod parser {
         float(i)
     }
 
-    fn point<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, [f32; 3], E> {
+    fn point<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, Vector3<f32>, E> {
         context(
             "point",
             delimited(
                 pair(char('('), ws),
-                map(tuple((num, ws, num, ws, num)), |(x, _, y, _, z)| [x, y, z]),
+                map(tuple((num, ws, num, ws, num)), |(x, _, y, _, z)| Vector3::new(x, y, z)),
                 pair(ws, char(')')),
             ),
         )(i)
@@ -110,7 +123,7 @@ mod parser {
             delimited(
                 pair(char('{'), ws),
                 map(many0(plane), |brush| brush),
-                pair(ws, char('}')),
+                tuple((ws, char('}'), ws)),
             ),
         )(i)
     }
@@ -132,61 +145,67 @@ mod parser {
         )(i)
     }
 
-    pub(super) fn parse_map<'a, E: ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> IResult<&'a str, Map, E> {
-        context(
-            "parse_map",
-            preceded(ws, map(many0(entity), |entities| Map(entities)))
-        )(i)
+    pub fn parse_map<'a, E: std::error::Error + ParseError<&'a str> + ContextError<&'a str>>(i: &'a str) -> Result<Map, E> {
+        context("parse_map",
+            preceded(ws, map(many0(entity), |entities| Map { entities }))
+        )(i).finish().map(|(_, map)| map)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use core::panic;
-    use std::str::FromStr;
 
     use crate::Map;
 
-    const MAP_EMPTY_ENTITY: &str = "{}";
-    const MAP_PROPERTY: &str = "{\"hello\" \"world\"}";
-    const MAP_BRUSH: &str = "{{( -64 -64 -16 ) ( -64 -63 -16 ) ( -64 -64 -15 ) __TB_empty 0 0 0 1 1 }}";
-    const MAP_SQUARE: &str = r#"
-        {
-        "classname" "worldspawn"
-        {
-        ( -64 -64 -16 ) ( -64 -63 -16 ) ( -64 -64 -15 ) __TB_empty 0 0 0 1 1
-        ( -64 -64 -16 ) ( -64 -64 -15 ) ( -63 -64 -16 ) __TB_empty 0 0 0 1 1
-        ( -64 -64 -16 ) ( -63 -64 -16 ) ( -64 -63 -16 ) __TB_empty 0 0 0 1 1
-        ( 64 64 16 ) ( 64 65 16 ) ( 65 64 16 ) __TB_empty 0 0 0 1 1
-        ( 64 64 16 ) ( 65 64 16 ) ( 64 64 17 ) __TB_empty 0 0 0 1 1
-        ( 64 64 16 ) ( 64 64 17 ) ( 64 65 16 ) __TB_empty 0 0 0 1 1
-        }
-        }
-    "#;
+    #[test]
+    fn map_empty() {
+        test_map(&String::default());
+    }
 
     #[test]
-    fn from_str_test() {
-        match Map::from_str(&String::default()) {
-            Ok(map) => println!("{map:#?}"),
-            Err(e) => panic!("{e}"),
-        }
+    fn map_entity() {
+        test_map(&"{}");
+    }
 
-        match Map::from_str(MAP_EMPTY_ENTITY) {
-            Ok(map) => println!("{map:#?}"),
-            Err(e) => panic!("{e}"),
-        }
+    #[test]
+    fn map_property() {
+        test_map(&"{\"hello\" \"world\"}");
+    }
 
-        match Map::from_str(MAP_PROPERTY) {
-            Ok(map) => println!("{map:#?}"),
-            Err(e) => panic!("{e}"),
-        }
+    #[test]
+    fn map_brush() {
+        test_map(&"{{( -64 -64 -16 ) ( -64 -63 -16 ) ( -64 -64 -15 ) __TB_empty 0 0 0 1 1 }}");
+    }
 
-        match Map::from_str(MAP_BRUSH) {
-            Ok(map) => println!("{map:#?}"),
-            Err(e) => panic!("{e}"),
-        }
+    #[test]
+    fn map_cube() {
+        test_map(&r#"
+            // Game: Generic
+            // Format: Standard
+            // entity 0
+            {
+            "classname" "worldspawn"
+            // brush 0
+            {
+            ( -64 -16 -64 ) ( -64 -16 -63 ) ( -64 -17 -64 ) __TB_empty 0 0 90 1 1
+            ( 64 -64 64 ) ( 64 -64 65 ) ( 65 -64 64 ) __TB_empty 0 0 0 1 1
+            ( -64 -16 -64 ) ( -64 -17 -64 ) ( -63 -16 -64 ) __TB_empty 0 0 0 1 -1
+            ( 64 -48 64 ) ( 65 -48 64 ) ( 64 -49 64 ) __TB_empty 0 0 0 1 -1
+            ( -64 64 -64 ) ( -63 64 -64 ) ( -64 64 -63 ) __TB_empty 0 0 0 1 1
+            ( 64 -48 64 ) ( 64 -49 64 ) ( 64 -48 65 ) __TB_empty 0 0 90 1 1
+            }
+            }
+        "#);
+    }
 
-        match Map::from_str(MAP_SQUARE) {
+    #[test]
+    fn map_cabin() {
+        test_map(include_str!("cabin.map"));
+    }
+
+    fn test_map(map: &str) {
+        match Map::load(map) {
             Ok(map) => println!("{map:#?}"),
             Err(e) => panic!("{e}"),
         }
