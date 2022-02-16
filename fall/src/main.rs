@@ -3,6 +3,7 @@ mod map;
 mod graphics;
 mod resolution;
 
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -25,6 +26,7 @@ use winit::window::WindowBuilder;
 #[clap(author, version, about, long_about = None)]
 struct Args {
     map_path: Option<PathBuf>,
+    host: Option<Ipv4Addr>,
 }
 
 #[tokio::main]

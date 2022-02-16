@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "gungame",
-    "gungame_core",
+    "fall",
+    "fall_core",
 ]

@@ -1,5 +1,5 @@
 [package]
-name = "gungame"
+name = "fall"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
@@ -9,7 +9,7 @@ anyhow = "1.0.53"
 bytemuck = { version = "1.7.3", features = ["derive"] }
 clap = { version = "3.0.14", features = ["derive"] }
 env_logger = "0.9.0"
-gungame_core = { path = "../gungame_core" }
+fall_core = { path = "../fall_core" }
 log = "0.4.14"
 nalgebra = "0.30.1"
 nalgebra-glm = "0.16.0"
