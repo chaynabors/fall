@@ -1,10 +1,11 @@
-use std::ops::Range;
-
 use anyhow::anyhow;
 use anyhow::Result;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
 use log::warn;
+use mappy::Map;
+use mappy::SurfaceInfo;
+use nalgebra::Point3;
 use wgpu::Backends;
 use wgpu::BindGroup;
 use wgpu::BindGroupDescriptor;
@@ -12,10 +13,12 @@ use wgpu::BindGroupEntry;
 use wgpu::BindGroupLayout;
 use wgpu::BindGroupLayoutDescriptor;
 use wgpu::BindGroupLayoutEntry;
+use wgpu::BindingResource;
 use wgpu::BindingType;
 use wgpu::BlendState;
 use wgpu::Buffer;
 use wgpu::BufferAddress;
+use wgpu::BufferBinding;
 use wgpu::BufferBindingType;
 use wgpu::BufferDescriptor;
 use wgpu::BufferSize;
@@ -30,7 +33,6 @@ use wgpu::DepthStencilState;
 use wgpu::Device;
 use wgpu::DeviceDescriptor;
 use wgpu::Extent3d;
-use wgpu::Face;
 use wgpu::Features;
 use wgpu::FragmentState;
 use wgpu::FrontFace;
@@ -72,13 +74,11 @@ use wgpu::VertexStepMode;
 use wgpu::include_wgsl;
 use wgpu::util::BufferInitDescriptor;
 use wgpu::util::DeviceExt;
+use wgpu::vertex_attr_array;
 use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::resolution::Resolution;
-
-use super::vertex::VERTEX_ATTRIBUTES;
-use super::vertex::Vertex;
 
 pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -116,17 +116,17 @@ pub struct Renderer {
     pub shader: ShaderModule,
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
-    pub vertex_count: u32,
-    pub vertex_groups: Vec<Range<u32>>,
+    pub vertex_counts: Vec<u32>,
     pub vertices: Buffer,
     pub globals: Buffer,
+    pub locals: Buffer,
     pub bind_group: BindGroup,
     pub depth_stencil: Texture,
     pub depth_stencil_view: TextureView,
 }
 
 impl Renderer {
-    pub async fn new(window: &Window, resolution: Resolution) -> Result<Self> {
+    pub async fn new(window: &Window, resolution: Resolution, map: &Map<'_>) -> Result<Self> {
         let instance = Instance::new(Backends::PRIMARY);
 
         let surface = unsafe { instance.create_surface(&window) };
@@ -141,7 +141,7 @@ impl Renderer {
         };
 
         let (device, queue) = match adapter.request_device(
-            &DeviceDescriptor { label: Some("device"), features: Features::POLYGON_MODE_LINE, limits: Limits::default() },
+            &DeviceDescriptor { label: Some("device"), features: Features::empty(), limits: Limits::default() },
             None,
         ).await {
             Ok(dq) => dq,
@@ -172,6 +172,16 @@ impl Renderer {
                         min_binding_size: BufferSize::new(std::mem::size_of::<Globals>() as _),
                     },
                     count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: BufferSize::new(std::mem::size_of::<SurfaceInfo>() as _),
+                    },
+                    count: None,
                 }
             ],
         });
@@ -191,16 +201,16 @@ impl Renderer {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
+                    array_stride: std::mem::size_of::<Point3<f32>>() as BufferAddress,
                     step_mode: VertexStepMode::Vertex,
-                    attributes: VERTEX_ATTRIBUTES,
+                    attributes: &vertex_attr_array![0 => Float32x3],
                 }],
             },
             primitive: PrimitiveState {
-                topology: PrimitiveTopology::LineList,
+                topology: PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
-                cull_mode: Some(Face::Back),
+                cull_mode: None,
                 unclipped_depth: false,
                 polygon_mode: PolygonMode::Fill,
                 conservative: false,
@@ -225,11 +235,9 @@ impl Renderer {
             multiview: None,
         });
 
-        let vertex_count = 0;
-        let vertex_groups = vec![];
         let vertices = device.create_buffer(&BufferDescriptor {
             label: Some("vertices"),
-            size: (vertex_count as usize * std::mem::size_of::<Vertex>()) as BufferAddress,
+            size: 0,
             usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
@@ -237,6 +245,12 @@ impl Renderer {
         let globals = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("globals"),
             contents: bytemuck::bytes_of(&Globals::from_camera(Camera::default(), resolution)),
+            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+        });
+
+        let locals = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("locals"),
+            contents: bytemuck::cast_slice(&map.surface_info),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
@@ -248,6 +262,14 @@ impl Renderer {
                     binding: 0,
                     resource: globals.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &locals,
+                        offset: 0,
+                        size: BufferSize::new(std::mem::size_of::<SurfaceInfo>() as u64),
+                    })
+                }
             ],
         });
 
@@ -262,10 +284,10 @@ impl Renderer {
             shader,
             pipeline_layout,
             pipeline,
-            vertex_count,
-            vertex_groups,
+            vertex_counts: vec![],
             vertices,
             globals,
+            locals,
             bind_group,
             depth_stencil,
             depth_stencil_view,
@@ -288,12 +310,11 @@ impl Renderer {
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&Globals::from_camera(camera, resolution)));
     }
 
-    pub fn load_map(&mut self, vertices: &[Vertex], vertex_groups: Vec<Range<u32>>) {
-        self.vertex_count = vertices.len() as _;
-        self.vertex_groups = vertex_groups;
+    pub fn load_map(&mut self, map: &Map) {
+        self.vertex_counts = map.vertex_counts.to_owned();
         self.vertices = self.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("vertices"),
-            contents: bytemuck::cast_slice(vertices),
+            contents: bytemuck::cast_slice(&map.vertices),
             usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
         });
     }
@@ -344,9 +365,12 @@ impl Renderer {
 
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_vertex_buffer(0, self.vertices.slice(..));
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-            for vertex_group in &self.vertex_groups {
-                render_pass.draw(vertex_group.clone(), 0..1);
+            let mut start = 0;
+            for i in 0..self.vertex_counts.len() {
+                render_pass.set_bind_group(0, &self.bind_group, &[(i * std::mem::size_of::<SurfaceInfo>()) as u32]);
+                let vertex_count = self.vertex_counts[i];
+                render_pass.draw(start..start + vertex_count, 0..1);
+                start += vertex_count;
             }
         }
 

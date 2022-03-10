@@ -1,10 +1,8 @@
-// Copyright 2021 Chay Nabors.
-
 use nalgebra::Isometry3;
+use nalgebra::Matrix4;
 use nalgebra::Point3;
 use nalgebra::UnitQuaternion;
 use nalgebra::Vector3;
-use nalgebra_glm::TMat4;
 use nalgebra_glm::reversed_infinite_perspective_rh_zo;
 
 use crate::resolution::Resolution;
@@ -38,7 +36,7 @@ impl Camera {
         )
     }
 
-    pub fn projection(&self, resolution: Resolution) -> TMat4<f32> {
+    pub fn projection(&self, resolution: Resolution) -> Matrix4<f32> {
         reversed_infinite_perspective_rh_zo(resolution.aspect_ratio(), self.fov, 0.1)
     }
 

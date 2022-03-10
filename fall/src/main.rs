@@ -1,5 +1,4 @@
 mod camera;
-mod map;
 mod graphics;
 mod resolution;
 
@@ -12,7 +11,8 @@ use camera::Camera;
 use clap::Parser;
 use graphics::Renderer;
 use log::error;
-use map::Map;
+use mappy::Map;
+use mappy::SurfaceInfo;
 use nalgebra::Point3;
 use resolution::Resolution;
 use winit::dpi::PhysicalSize;
@@ -33,25 +33,14 @@ struct Args {
 async fn main() -> Result<()> {
     env_logger::init();
 
+    println!("{}", std::mem::size_of::<SurfaceInfo>());
+
     let args = Args::parse();
     let map_data = match args.map_path {
         Some(p) => std::fs::read_to_string(p)?,
         None => include_str!("cabin.map").to_string(),
     };
     let map = Map::from_str(&map_data)?;
-    let mut vertices = vec![];
-    let mut vertex_groups = vec![];
-    let mut vertex_count = 0;
-    for entity in map.entities {
-        for brush in entity.brushes {
-            let points = brush.vertices();
-            vertex_groups.push(vertex_count..vertex_count + points.len() as u32);
-            for point in &points {
-                vertices.push((*point).into());
-            }
-            vertex_count += points.len() as u32;
-        }
-    }
 
     let event_loop = EventLoop::new();
     let mut resolution = Resolution::new(1280, 720);
@@ -60,8 +49,8 @@ async fn main() -> Result<()> {
         .build(&event_loop)?;
 
     let mut camera = Camera::default();
-    let mut renderer = Renderer::new(&window, resolution).await?;
-    renderer.load_map(&vertices, vertex_groups);
+    let mut renderer = Renderer::new(&window, resolution, &map).await?;
+    renderer.load_map(&map);
 
     let start_time = Instant::now();
     event_loop.run(move |event, _, control_flow| {
@@ -83,7 +72,7 @@ async fn main() -> Result<()> {
                 }
             },
             Event::MainEventsCleared => {
-                let elapsed_time = start_time.elapsed().as_secs_f32();
+                let elapsed_time = start_time.elapsed().as_secs_f32() * 0.5;
                 camera.position = Point3::new(elapsed_time.sin() * 1000.0, 500.0, elapsed_time.cos() * 1000.0);
                 camera.look_at(Point3::new(0.0, 0.0, 0.0));
                 window.request_redraw();

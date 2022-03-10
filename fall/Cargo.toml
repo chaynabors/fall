@@ -5,16 +5,17 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-anyhow = "1.0.53"
+anyhow = "1.0.54"
 bytemuck = { version = "1.7.3", features = ["derive"] }
-clap = { version = "3.0.14", features = ["derive"] }
+clap = { version = "3.1.0", features = ["derive"] }
 env_logger = "0.9.0"
 fall_core = { path = "../fall_core" }
 log = "0.4.14"
+mappy = { path = "../../mappy" }
 nalgebra = "0.30.1"
 nalgebra-glm = "0.16.0"
 nom = "7.1.0"
 parry3d = "0.8.0"
-tokio = { version = "1.16.1", features = ["full"] }
+tokio = { version = "1.17.0", features = ["full"] }
 wgpu = "0.12.0"
 winit = "0.26.1"
