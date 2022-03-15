@@ -1,12 +1,9 @@
-use anyhow::anyhow;
-use anyhow::Result;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
-use log::warn;
 use mappy::Map;
 use mappy::SurfaceInfo;
 use nalgebra::Point3;
-use wgpu::Backends;
+use rendering_util::RenderingContext;
 use wgpu::BindGroup;
 use wgpu::BindGroupDescriptor;
 use wgpu::BindGroupEntry;
@@ -31,36 +28,25 @@ use wgpu::CompareFunction;
 use wgpu::DepthBiasState;
 use wgpu::DepthStencilState;
 use wgpu::Device;
-use wgpu::DeviceDescriptor;
 use wgpu::Extent3d;
-use wgpu::Features;
 use wgpu::FragmentState;
 use wgpu::FrontFace;
-use wgpu::Instance;
-use wgpu::Limits;
 use wgpu::LoadOp;
 use wgpu::MultisampleState;
 use wgpu::Operations;
 use wgpu::PipelineLayout;
 use wgpu::PipelineLayoutDescriptor;
 use wgpu::PolygonMode;
-use wgpu::PowerPreference;
-use wgpu::PresentMode;
 use wgpu::PrimitiveState;
 use wgpu::PrimitiveTopology;
-use wgpu::Queue;
 use wgpu::RenderPassColorAttachment;
 use wgpu::RenderPassDepthStencilAttachment;
 use wgpu::RenderPassDescriptor;
 use wgpu::RenderPipeline;
 use wgpu::RenderPipelineDescriptor;
-use wgpu::RequestAdapterOptions;
 use wgpu::ShaderModule;
 use wgpu::ShaderStages;
 use wgpu::StencilState;
-use wgpu::Surface;
-use wgpu::SurfaceConfiguration;
-use wgpu::SurfaceError;
 use wgpu::Texture;
 use wgpu::TextureDescriptor;
 use wgpu::TextureDimension;
@@ -75,10 +61,8 @@ use wgpu::include_wgsl;
 use wgpu::util::BufferInitDescriptor;
 use wgpu::util::DeviceExt;
 use wgpu::vertex_attr_array;
-use winit::window::Window;
 
 use crate::camera::Camera;
-use crate::resolution::Resolution;
 
 pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -93,8 +77,8 @@ pub struct Globals {
 }
 
 impl Globals {
-    fn from_camera(camera: Camera, resolution: Resolution) -> Self {
-        let projection = camera.projection(resolution);
+    fn from_camera(camera: &Camera, width: u32, height: u32) -> Self {
+        let projection = camera.projection(width, height);
         let view = camera.view().to_homogeneous();
 
         Self {
@@ -107,60 +91,29 @@ impl Globals {
     }
 }
 
-pub struct Renderer {
-    pub surface: Surface,
-    pub device: Device,
-    pub queue: Queue,
-    pub surface_configuration: SurfaceConfiguration,
-    pub bind_group_layout: BindGroupLayout,
-    pub shader: ShaderModule,
-    pub pipeline_layout: PipelineLayout,
-    pub pipeline: RenderPipeline,
-    pub vertex_counts: Vec<u32>,
-    pub vertices: Buffer,
-    pub globals: Buffer,
-    pub locals: Buffer,
-    pub bind_group: BindGroup,
-    pub depth_stencil: Texture,
-    pub depth_stencil_view: TextureView,
+#[allow(dead_code)]
+pub struct MapRenderer {
+    width: u32,
+    height: u32,
+    bind_group_layout: BindGroupLayout,
+    shader: ShaderModule,
+    pipeline_layout: PipelineLayout,
+    pipeline: RenderPipeline,
+    vertex_counts: Vec<u32>,
+    vertices: Buffer,
+    globals: Buffer,
+    locals: Buffer,
+    bind_group: BindGroup,
+    depth_stencil: Texture,
+    depth_stencil_view: TextureView,
 }
 
-impl Renderer {
-    pub async fn new(window: &Window, resolution: Resolution, map: &Map<'_>) -> Result<Self> {
-        let instance = Instance::new(Backends::PRIMARY);
+impl MapRenderer {
+    pub fn new(rc: &RenderingContext, map: &Map<'_>) -> Self {
+        let width = rc.width();
+        let height = rc.height();
 
-        let surface = unsafe { instance.create_surface(&window) };
-
-        let adapter = match instance.request_adapter(&RequestAdapterOptions {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-        }).await {
-            Some(adapter) => adapter,
-            None => return Err(anyhow!("no suitable graphics adapter")),
-        };
-
-        let (device, queue) = match adapter.request_device(
-            &DeviceDescriptor { label: Some("device"), features: Features::empty(), limits: Limits::default() },
-            None,
-        ).await {
-            Ok(dq) => dq,
-            Err(_) => return Err(anyhow!("no suitable graphics device")),
-        };
-
-        let surface_configuration = SurfaceConfiguration {
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            format: match surface.get_preferred_format(&adapter) {
-                Some(format) => format,
-                None => return Err(anyhow!("incompatible surface")),
-            },
-            width: resolution.width,
-            height: resolution.height,
-            present_mode: PresentMode::Mailbox,
-        };
-        surface.configure(&device, &surface_configuration);
-
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        let bind_group_layout = rc.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("bind_group_layout"),
             entries: &[
                 BindGroupLayoutEntry {
@@ -186,15 +139,15 @@ impl Renderer {
             ],
         });
 
-        let shader = device.create_shader_module(&include_wgsl!("map.wgsl"));
+        let shader = rc.device.create_shader_module(&include_wgsl!("map.wgsl"));
 
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        let pipeline_layout = rc.device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        let pipeline = rc.device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("pipeline"),
             layout: Some(&pipeline_layout),
             vertex: VertexState {
@@ -227,7 +180,7 @@ impl Renderer {
                 module: &shader,
                 entry_point: "fs_main",
                 targets: &[ColorTargetState {
-                    format: surface_configuration.format,
+                    format: rc.surface_format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 }],
@@ -235,26 +188,28 @@ impl Renderer {
             multiview: None,
         });
 
-        let vertices = device.create_buffer(&BufferDescriptor {
+        let vertices = rc.device.create_buffer(&BufferDescriptor {
             label: Some("vertices"),
             size: 0,
             usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
 
-        let globals = device.create_buffer_init(&BufferInitDescriptor {
+        let globals = rc.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("globals"),
-            contents: bytemuck::bytes_of(&Globals::from_camera(Camera::default(), resolution)),
+            contents: bytemuck::bytes_of(
+                &Globals::from_camera(&Camera::default(), width, height)
+            ),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
-        let locals = device.create_buffer_init(&BufferInitDescriptor {
+        let locals = rc.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("locals"),
             contents: bytemuck::cast_slice(&map.surface_info),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+        let bind_group = rc.device.create_bind_group(&BindGroupDescriptor {
             label: Some("bind_group"),
             layout: &bind_group_layout,
             entries: &[
@@ -273,13 +228,11 @@ impl Renderer {
             ],
         });
 
-        let (depth_stencil, depth_stencil_view) = create_depth_stencil(&device, resolution);
+        let (depth_stencil, depth_stencil_view) = create_depth_stencil(&rc.device, rc.width(), rc.height());
 
-        Ok(Self {
-            surface,
-            device,
-            queue,
-            surface_configuration,
+        Self {
+            height,
+            width,
             bind_group_layout,
             shader,
             pipeline_layout,
@@ -291,62 +244,46 @@ impl Renderer {
             bind_group,
             depth_stencil,
             depth_stencil_view,
-        })
+        }
     }
 
-    pub fn resize(&mut self, resolution: Resolution) {
-        if resolution.width == 0 || resolution.height == 0 { return; }
-
-        self.surface_configuration.width = resolution.width;
-        self.surface_configuration.height = resolution.height;
-        self.surface.configure(&self.device, &self.surface_configuration);
-
-        let (depth_stencil, depth_stencil_view) = create_depth_stencil(&self.device, resolution);
-        self.depth_stencil = depth_stencil;
-        self.depth_stencil_view = depth_stencil_view;
-    }
-
-    pub fn write_globals(&self, camera: Camera, resolution: Resolution) {
-        self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&Globals::from_camera(camera, resolution)));
-    }
-
-    pub fn load_map(&mut self, map: &Map) {
+    pub fn load_map(&mut self, rc: &RenderingContext, map: &Map) {
         self.vertex_counts = map.vertex_counts.to_owned();
-        self.vertices = self.device.create_buffer_init(&BufferInitDescriptor {
+        self.vertices = rc.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("vertices"),
             contents: bytemuck::cast_slice(&map.vertices),
             usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
         });
     }
 
-    pub fn render(&self) -> Result<()> {
-        let surface = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(e) => match e {
-                SurfaceError::Timeout => {
-                    warn!("Timed out while retrieving surface");
-                    return Ok(());
-                },
-                SurfaceError::Outdated => {
-                    warn!("Retrieved surface was outdated");
-                    return Ok(());
-                },
-                SurfaceError::Lost => return Err(anyhow!("surface lost")),
-                SurfaceError::OutOfMemory => return Err(anyhow!("ran out of memory while retrieving surface")),
-            },
-        };
+    pub fn render(&mut self, rc: &RenderingContext, surface_view: &TextureView, camera: &Camera) {
+        // Update resolution if it's dirty
+        if self.width != rc.width() || self.height != rc.height() {
+            self.width = rc.width();
+            self.height = rc.height();
+            let (ds, dsv) = create_depth_stencil(&rc.device, self.width, self.height);
+            self.depth_stencil = ds;
+            self.depth_stencil_view = dsv;
+        }
 
-        let surface_view = surface.texture.create_view(&TextureViewDescriptor::default());
+        // Write our globals
+        rc.queue.write_buffer(
+            &self.globals,
+            0,
+            bytemuck::bytes_of(&Globals::from_camera(camera, self.width, self.height),
+        ));
 
-        let mut command_encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
+        // Build our command encoder
+        let mut command_encoder = rc.device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("command_encoder"),
         });
 
+        // Render it!
         {
             let mut render_pass = command_encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some("render_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view: &surface_view,
+                    view: surface_view,
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Clear(Color::BLACK),
@@ -374,20 +311,15 @@ impl Renderer {
             }
         }
 
-        self.queue.submit([command_encoder.finish()]);
-        surface.present();
-        Ok(())
+        // Submit our work
+        rc.queue.submit([command_encoder.finish()]);
     }
 }
 
-fn create_depth_stencil(device: &Device, resolution: Resolution) -> (Texture, TextureView) {
+fn create_depth_stencil(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
     let depth_stencil = device.create_texture(&TextureDescriptor {
         label: Some("depth_stencil"),
-        size: Extent3d {
-            width: resolution.width,
-            height: resolution.height,
-            depth_or_array_layers: 1,
-        },
+        size: Extent3d { width, height, depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,

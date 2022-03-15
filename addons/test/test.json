@@ -1,0 +1,9 @@
+{
+    "name": "Test",
+    "description": "This is a test of multiple addons",
+    "dependencies": [
+        "fall"
+    ],
+    "maps": [],
+    "models": []
+}

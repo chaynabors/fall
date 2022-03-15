@@ -1,0 +1,13 @@
+{
+    "name": "Fall",
+    "description": "For the unfallen",
+    "dependencies": [],
+    "maps": [
+        "maps/cabin.map",
+        "maps/cube.map",
+        "maps/cylinder.map"
+    ],
+    "models": [
+        "models/capsule.obj"
+    ]
+}

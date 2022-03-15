@@ -46,5 +46,6 @@ fn vs_main(
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     //let tex = textureLoad(r_color, vec2<i32>(in.tex_coord * 256.0), 0);
     //let v = f32(tex.x) / 255.0;
-    return vec4<f32>(1.0) * vec4<f32>(in.normal, 1.0);
+    //let l = dot(in.normal, normalize(vec3<f32>(1.0, -1.0, 1.0))) + 0.2;
+    return vec4<f32>(in.normal, 1.0);
 }

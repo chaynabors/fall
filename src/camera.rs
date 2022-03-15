@@ -1,11 +1,11 @@
+#![allow(dead_code)]
+
 use nalgebra::Isometry3;
 use nalgebra::Matrix4;
 use nalgebra::Point3;
 use nalgebra::UnitQuaternion;
 use nalgebra::Vector3;
 use nalgebra_glm::reversed_infinite_perspective_rh_zo;
-
-use crate::resolution::Resolution;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Camera {
@@ -36,8 +36,8 @@ impl Camera {
         )
     }
 
-    pub fn projection(&self, resolution: Resolution) -> Matrix4<f32> {
-        reversed_infinite_perspective_rh_zo(resolution.aspect_ratio(), self.fov, 0.1)
+    pub fn projection(&self, width: u32, height: u32) -> Matrix4<f32> {
+        reversed_infinite_perspective_rh_zo(width as f32 / height as f32, self.fov, 0.1)
     }
 
     pub fn look_at(&mut self, target: Point3<f32>) {
