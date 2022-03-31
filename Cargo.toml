@@ -8,14 +8,13 @@ resolver = "2"
 bytemuck = { version = "1.8.0", features = ["derive"] }
 clap = { version = "3.1.6", features = ["derive"] }
 env_logger = "0.9.0"
+gilrs = "0.8.2"
 legion = "0.4.0"
 log = "0.4.14"
-mappy = { git = "https://github.com/chaynabors/mappy" }
+mappy = { path = "../mappy" }
 nalgebra = "0.30.1"
-nalgebra-glm = "0.16.0"
-nom = "7.1.1"
 parry3d = "0.8.0"
-rendering_util = { git = "https://github.com/chaynabors/rendering_util" }
+rendering_util = { path = "../rendering_util" }
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 tobj = "3.2.1"

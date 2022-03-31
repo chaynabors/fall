@@ -1,2 +1,5 @@
 /target
 Cargo.lock
+*.blend
+*.blend1
+*.blend

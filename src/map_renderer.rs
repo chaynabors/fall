@@ -1,5 +1,3 @@
-use bytemuck::Pod;
-use bytemuck::Zeroable;
 use mappy::Map;
 use mappy::SurfaceInfo;
 use nalgebra::Point3;
@@ -17,7 +15,6 @@ use wgpu::Buffer;
 use wgpu::BufferAddress;
 use wgpu::BufferBinding;
 use wgpu::BufferBindingType;
-use wgpu::BufferDescriptor;
 use wgpu::BufferSize;
 use wgpu::BufferUsages;
 use wgpu::Color;
@@ -27,8 +24,6 @@ use wgpu::CommandEncoderDescriptor;
 use wgpu::CompareFunction;
 use wgpu::DepthBiasState;
 use wgpu::DepthStencilState;
-use wgpu::Device;
-use wgpu::Extent3d;
 use wgpu::FragmentState;
 use wgpu::FrontFace;
 use wgpu::LoadOp;
@@ -47,13 +42,7 @@ use wgpu::RenderPipelineDescriptor;
 use wgpu::ShaderModule;
 use wgpu::ShaderStages;
 use wgpu::StencilState;
-use wgpu::Texture;
-use wgpu::TextureDescriptor;
-use wgpu::TextureDimension;
-use wgpu::TextureFormat;
-use wgpu::TextureUsages;
 use wgpu::TextureView;
-use wgpu::TextureViewDescriptor;
 use wgpu::VertexBufferLayout;
 use wgpu::VertexState;
 use wgpu::VertexStepMode;
@@ -62,59 +51,27 @@ use wgpu::util::BufferInitDescriptor;
 use wgpu::util::DeviceExt;
 use wgpu::vertex_attr_array;
 
-use crate::camera::Camera;
-
-pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct Globals {
-        proj: [[f32; 4]; 4],
-        proj_inv: [[f32; 4]; 4],
-        view: [[f32; 4]; 4],
-        view_proj: [[f32; 4]; 4],
-        cam_pos: [f32; 4],
-}
-
-impl Globals {
-    fn from_camera(camera: &Camera, width: u32, height: u32) -> Self {
-        let projection = camera.projection(width, height);
-        let view = camera.view().to_homogeneous();
-
-        Self {
-            proj: projection.into(),
-            proj_inv: projection.try_inverse().unwrap().into(),
-            view: view.into(),
-            view_proj: (projection * view).into(),
-            cam_pos: camera.position.to_homogeneous().into(),
-        }
-    }
-}
+use crate::graphics::DEPTH_FORMAT;
+use crate::graphics::Globals;
 
 #[allow(dead_code)]
 pub struct MapRenderer {
-    width: u32,
-    height: u32,
-    bind_group_layout: BindGroupLayout,
     shader: ShaderModule,
+    bind_group_layout: BindGroupLayout,
     pipeline_layout: PipelineLayout,
     pipeline: RenderPipeline,
     vertex_counts: Vec<u32>,
     vertices: Buffer,
-    globals: Buffer,
     locals: Buffer,
     bind_group: BindGroup,
-    depth_stencil: Texture,
-    depth_stencil_view: TextureView,
 }
 
 impl MapRenderer {
-    pub fn new(rc: &RenderingContext, map: &Map<'_>) -> Self {
-        let width = rc.width();
-        let height = rc.height();
+    pub fn new(rc: &RenderingContext, globals: &Buffer, map: &Map<'_>) -> Self {
+        let shader = rc.device.create_shader_module(&include_wgsl!("map.wgsl"));
 
         let bind_group_layout = rc.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("bind_group_layout"),
+            label: Some("MapRenderer::bind_group_layout"),
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
@@ -139,16 +96,14 @@ impl MapRenderer {
             ],
         });
 
-        let shader = rc.device.create_shader_module(&include_wgsl!("map.wgsl"));
-
         let pipeline_layout = rc.device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("pipeline_layout"),
+            label: Some("MapRenderer::pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         let pipeline = rc.device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("pipeline"),
+            label: Some("MapRenderer::pipeline"),
             layout: Some(&pipeline_layout),
             vertex: VertexState {
                 module: &shader,
@@ -162,7 +117,7 @@ impl MapRenderer {
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
-                front_face: FrontFace::Ccw,
+                front_face: FrontFace::Cw,
                 cull_mode: None,
                 unclipped_depth: false,
                 polygon_mode: PolygonMode::Fill,
@@ -188,29 +143,21 @@ impl MapRenderer {
             multiview: None,
         });
 
-        let vertices = rc.device.create_buffer(&BufferDescriptor {
-            label: Some("vertices"),
-            size: 0,
+        let vertex_counts = map.vertex_counts.to_owned();
+        let vertices = rc.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("MapRenderer::vertices"),
+            contents: bytemuck::cast_slice(&map.vertices),
             usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        });
-
-        let globals = rc.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("globals"),
-            contents: bytemuck::bytes_of(
-                &Globals::from_camera(&Camera::default(), width, height)
-            ),
-            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
         let locals = rc.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("locals"),
+            label: Some("MapRenderer::locals"),
             contents: bytemuck::cast_slice(&map.surface_info),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
         let bind_group = rc.device.create_bind_group(&BindGroupDescriptor {
-            label: Some("bind_group"),
+            label: Some("MapRenderer::bind_group"),
             layout: &bind_group_layout,
             entries: &[
                 BindGroupEntry {
@@ -228,51 +175,24 @@ impl MapRenderer {
             ],
         });
 
-        let (depth_stencil, depth_stencil_view) = create_depth_stencil(&rc.device, rc.width(), rc.height());
-
         Self {
-            height,
-            width,
-            bind_group_layout,
             shader,
+            bind_group_layout,
             pipeline_layout,
             pipeline,
-            vertex_counts: vec![],
+            vertex_counts,
             vertices,
-            globals,
             locals,
             bind_group,
-            depth_stencil,
-            depth_stencil_view,
         }
     }
 
-    pub fn load_map(&mut self, rc: &RenderingContext, map: &Map) {
-        self.vertex_counts = map.vertex_counts.to_owned();
-        self.vertices = rc.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("vertices"),
-            contents: bytemuck::cast_slice(&map.vertices),
-            usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
-        });
-    }
-
-    pub fn render(&mut self, rc: &RenderingContext, surface_view: &TextureView, camera: &Camera) {
-        // Update resolution if it's dirty
-        if self.width != rc.width() || self.height != rc.height() {
-            self.width = rc.width();
-            self.height = rc.height();
-            let (ds, dsv) = create_depth_stencil(&rc.device, self.width, self.height);
-            self.depth_stencil = ds;
-            self.depth_stencil_view = dsv;
-        }
-
-        // Write our globals
-        rc.queue.write_buffer(
-            &self.globals,
-            0,
-            bytemuck::bytes_of(&Globals::from_camera(camera, self.width, self.height),
-        ));
-
+    pub fn render(
+        &mut self,
+        rc: &RenderingContext,
+        surface_view: &TextureView,
+        depth_stencil_view: &TextureView,
+    ) {
         // Build our command encoder
         let mut command_encoder = rc.device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("command_encoder"),
@@ -291,7 +211,7 @@ impl MapRenderer {
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &self.depth_stencil_view,
+                    view: &depth_stencil_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Clear(0.0),
                         store: true,
@@ -314,20 +234,4 @@ impl MapRenderer {
         // Submit our work
         rc.queue.submit([command_encoder.finish()]);
     }
-}
-
-fn create_depth_stencil(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
-    let depth_stencil = device.create_texture(&TextureDescriptor {
-        label: Some("depth_stencil"),
-        size: Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: DEPTH_FORMAT,
-        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-    });
-
-    let depth_stencil_view = depth_stencil.create_view(&TextureViewDescriptor::default());
-
-    (depth_stencil, depth_stencil_view)
 }

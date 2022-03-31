@@ -1,16 +1,29 @@
 use legion::system;
+use nalgebra::Matrix4;
 use nalgebra::Point3;
+use nalgebra::UnitQuaternion;
+use nalgebra::vector;
 use nalgebra::Vector3;
+use tokio::sync::mpsc::UnboundedSender;
 use winit::dpi::PhysicalSize;
+
+use crate::camera::Camera;
+use crate::input::InputState;
+use crate::model_renderer::Instance;
+use crate::time::DeltaTime;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model(pub u32);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlayerBrain;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Position(pub Point3<f32>);
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Resolution {
-    ///
     pub width: u32,
-    ///
     pub height: u32,
 }
 
@@ -27,7 +40,7 @@ impl Into<PhysicalSize<u32>> for Resolution {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Model(u32);
+pub struct Rotation(pub UnitQuaternion<f32>);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Speed(pub f32);
@@ -37,22 +50,47 @@ pub struct Velocity(pub Vector3<f32>);
 
 #[system(for_each)]
 pub fn update_positions(
+    #[resource] delta_time: &DeltaTime,
     position: &mut Position,
     velocity: &Velocity,
-    #[resource] delta_time: &f32,
 ) {
-    position.0 += velocity.0 * *delta_time;
-    println!("{:?}", position.0);
+    position.0 += velocity.0.scale(delta_time.0);
 }
 
 #[system(for_each)]
-pub fn update_velocities(
+pub fn update_player_velocities(
+    #[resource] input: &InputState,
     velocity: &mut Velocity,
+    player_brain: &PlayerBrain,
     speed: &Speed,
-    #[resource] dir: &Option<Vector3<f32>>,
 ) {
-    match dir {
-        Some(dir) => velocity.0 = dir.scale(speed.0),
-        None => velocity.0 = Vector3::zeros(),
-    }
+    let dir = input.move_direction;
+    velocity.0 = vector![dir.x, 0.0, dir.y].scale(speed.0);
+}
+
+#[system(for_each)]
+pub fn update_player_camera(
+    #[resource] camera: &mut Camera,
+    _player_brain: &PlayerBrain,
+    position: &Position,
+    rotation: &Rotation,
+) {
+    let mut position = position.0;
+    position.y += 1.65;
+    camera.position = position;
+    camera.rotation = rotation.0;
+}
+
+#[system(for_each)]
+pub fn render_models(
+    #[resource] send: &UnboundedSender<Instance>,
+    _model: &Model,
+    position: &Position,
+    rotation: &Rotation,
+) {
+    // TODO: unwrapping is a code smell
+    send.send(Instance {
+        model: Matrix4::new_translation(&position.0.coords),
+        normal: rotation.0.into(),
+    }).unwrap();
 }

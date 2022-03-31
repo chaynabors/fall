@@ -1,0 +1,2 @@
+- Devil Daggers
+- Gauntlet: Dark Legacy

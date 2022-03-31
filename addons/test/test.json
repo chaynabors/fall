@@ -1,6 +1,9 @@
 {
-    "name": "Test",
-    "description": "This is a test of multiple addons",
+    "name": "test",
+    "version": 1,
+    "authors": [
+        "Chay Nabors"
+    ],
     "dependencies": [
         "fall"
     ],

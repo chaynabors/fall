@@ -1,0 +1,3 @@
+- Ape Escape
+- Devil Daggers
+- Kirby 64

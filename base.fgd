@@ -1,3 +1,7 @@
-@PointClass size(-8 -8 0, 8 8 29.2) color(0 0.5 0) = player_spawn []
+@PointClass size(-8 -8 0, 8 8 29.2608) color(0 0.5 0) = player_spawn []
 
-@PointClass size(-8 -8 0, 8 8 29.2) color(0.5 0 0) = zombie_spawn []
+@PointClass size(-8 -8 0, 8 8 29.2608) color(0.5 0 0) = zombie_spawn []
+
+@SolidClass = warp_zone [
+    destination(string)
+]
