@@ -3,6 +3,7 @@ use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
 
+use indexmap::IndexMap;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -16,15 +17,23 @@ pub struct Addon {
     pub version: u32,
     /// Collection of all the authors of the addon
     pub authors: Vec<String>,
-    /// All of the dependencies this addon has
+    /// The names of the addons this addon depends on
     pub dependencies: Vec<String>,
-    /// A collection of maps by their internal name
-    pub maps: HashMap<String, PathBuf>,
+    /// A collection of maps by their internal name, the first map has precedence
+    pub maps: IndexMap<String, PathBuf>,
     /// A collection of models by their internal name
     ///
     /// Supported file types are:
     /// - `obj`: An open file format without support for animation
     pub models: HashMap<String, PathBuf>,
+    /// A collection of textures by their internal name
+    ///
+    /// Supported file types are:
+    /// - `png` Recommended
+    /// - `jpg`
+    /// - `gif`
+    /// - `bmp`
+    pub textures: HashMap<String, PathBuf>,
 }
 
 impl Addon {

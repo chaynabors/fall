@@ -1,52 +1,18 @@
 use legion::system;
 use nalgebra::Matrix4;
-use nalgebra::Point3;
-use nalgebra::UnitQuaternion;
 use nalgebra::vector;
-use nalgebra::Vector3;
 use tokio::sync::mpsc::UnboundedSender;
-use winit::dpi::PhysicalSize;
 
 use crate::camera::Camera;
+use crate::components::Model;
+use crate::components::PlayerBrain;
+use crate::components::Position;
+use crate::components::Rotation;
+use crate::components::Speed;
+use crate::components::Velocity;
+use crate::graphics::Instance;
 use crate::input::InputState;
-use crate::model_renderer::Instance;
 use crate::time::DeltaTime;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Model(pub u32);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PlayerBrain;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Position(pub Point3<f32>);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Resolution {
-    pub width: u32,
-    pub height: u32,
-}
-
-impl From<PhysicalSize<u32>> for Resolution {
-    fn from(from: PhysicalSize<u32>) -> Self {
-        Self { width: from.width, height: from.height }
-    }
-}
-
-impl Into<PhysicalSize<u32>> for Resolution {
-    fn into(self) -> PhysicalSize<u32> {
-        PhysicalSize { width: self.width, height: self.height }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rotation(pub UnitQuaternion<f32>);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Speed(pub f32);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Velocity(pub Vector3<f32>);
 
 #[system(for_each)]
 pub fn update_positions(

@@ -1,46 +1,27 @@
 mod addon;
 mod camera;
-mod ecs;
+mod components;
 mod error;
 mod graphics;
 mod input;
-mod map_renderer;
-mod model;
-mod model_renderer;
 mod time;
+mod systems;
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
 
-use addon::Addon;
-use camera::Camera;
 use clap::Parser;
-use ecs::PlayerBrain;
-use ecs::Position;
-use ecs::Rotation;
-use ecs::Speed;
-use ecs::render_models_system;
-use ecs::update_player_camera_system;
-use ecs::update_positions_system;
-use ecs::update_player_velocities_system;
-use ecs::Velocity;
-use error::Error;
-use input::Input;
 use legion::Resources;
 use legion::Schedule;
 use legion::World;
-use log::LevelFilter;
-use log::error;
-use log::info;
-use log::warn;
 use mappy::Map;
-use model::Model;
 use nalgebra::Point3;
 use nalgebra::UnitQuaternion;
 use nalgebra::Vector3;
-use time::Time;
 use tokio::sync::mpsc;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 use winit::dpi::PhysicalSize;
 use winit::event::DeviceEvent;
 use winit::event::Event;
@@ -49,46 +30,82 @@ use winit::event_loop::ControlFlow;
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-use crate::ecs::Resolution;
-use crate::graphics::Graphics;
+use self::addon::Addon;
+use self::camera::Camera;
+use self::components::PlayerBrain;
+use self::components::Position;
+use self::components::Resolution;
+use self::components::Rotation;
+use self::components::Speed;
+use self::components::Velocity;
+use self::error::Error;
+use self::graphics::Graphics;
+use self::input::Input;
+use self::systems::render_models_system;
+use self::systems::update_player_camera_system;
+use self::systems::update_positions_system;
+use self::systems::update_player_velocities_system;
+use self::time::Time;
+
+const GAME_NAME: &str = env!("CARGO_PKG_NAME");
+const GAME_NAME_DISPLAY: &str = "Gungame";
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    map: Option<PathBuf>,
+    /// Name of the addon to load, defaults to the base game
+    addon: Option<String>,
+    /// Address of the server host (if any)
     host: Option<Ipv4Addr>,
 }
 
+type Result<T> = std::result::Result<T, Error>;
+
 #[tokio::main]
-async fn main() -> Result<(), Error> {
-    env_logger::builder().filter_level(LevelFilter::Info).init();
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
 
-    // Load our addon
-    let addon_path: PathBuf = "addons/fall".into();
-    let addon_name = "fall.json";
-    let addon = Addon::from_path(&addon_path.join(&addon_name))?;
-    if addon.maps.len() == 0 {
-        warn!("No maps to load, exiting...");
-        return Ok(());
-    }
+    // Acquire all of our useful directories
+    let userdirs = directories::UserDirs::new().ok_or(Error::NoUserDirectory)?;
+    let document_dir = userdirs.document_dir().ok_or(Error::NoDocumentDirectory)?;
+    let game_dir = document_dir.join(GAME_NAME_DISPLAY);
+    let addons_dir = game_dir.join("addons");
+
+    // Load the given addon or base game otherwise
+    let addon_name = args.addon.unwrap_or(GAME_NAME.to_string());
+    let addon_dir = addons_dir.join(&addon_name);
+    let addon = Addon::from_path(&addon_dir.join(format!("{addon_name}.json")))?;
 
     // Load our map
-    let map_data = match args.map {
-        Some(path) => std::fs::read_to_string(path)?,
-        None => std::fs::read_to_string(
-            addon_path.join(&addon.maps["cabin"])
-        )?
+    let map_path = match addon.maps.first() {
+        Some(map) => addon_dir.join(map.1),
+        None => {
+            warn!("No maps to load, exiting...");
+            return Ok(());
+        },
     };
+    let map_data = std::fs::read_to_string(map_path)?;
     let map = Map::from_str(&map_data)?;
 
-    let mut model_indices_by_name = HashMap::new();
+    // Load models
+    let mut model_indices = HashMap::new();
     let mut models = vec![];
     for (i, (name, path)) in addon.models.iter().enumerate() {
-        model_indices_by_name.insert(name, i);
-        models.push(Model::from_obj(&addon_path.join(path))?);
+        model_indices.insert(name, i);
+        models.push(graphics::Model::from_obj(&addon_dir.join(path))?);
     }
 
+    // Load textures
+    let mut texture_indices = HashMap::new();
+    let mut textures = vec![];
+    for (i, (name, path)) in addon.textures.iter().enumerate() {
+        texture_indices.insert(name, i);
+        textures.push(graphics::Texture::from_file(&addon_dir.join(path))?);
+    }
+
+    // Set up our event loop
     let event_loop = EventLoop::new();
     let mut resolution = Resolution { width: 1280, height: 720 };
     let window = WindowBuilder::new()
@@ -105,7 +122,7 @@ async fn main() -> Result<(), Error> {
     let mut world = World::default();
 
     let player = world.push((
-        ecs::Model(1),
+        components::Model(1),
         PlayerBrain,
         Position(Point3::origin()),
         Rotation(UnitQuaternion::identity()),
@@ -137,7 +154,7 @@ async fn main() -> Result<(), Error> {
                 },
                 WindowEvent::ScaleFactorChanged { scale_factor: sf, new_inner_size } => {
                     scale_factor = sf;
-                    resolution = (*new_inner_size).into()
+                    resolution = (*new_inner_size).into();
                 },
                 _ => (),
             },

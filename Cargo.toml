@@ -7,10 +7,11 @@ resolver = "2"
 [dependencies]
 bytemuck = { version = "1.8.0", features = ["derive"] }
 clap = { version = "3.1.6", features = ["derive"] }
-env_logger = "0.9.0"
+directories = "4.0.1"
 gilrs = "0.8.2"
+image = "0.24.1"
+indexmap = { version = "1.8.1", features = ["serde"] }
 legion = "0.4.0"
-log = "0.4.14"
 mappy = { path = "../mappy" }
 nalgebra = "0.30.1"
 parry3d = "0.8.0"
@@ -19,5 +20,7 @@ serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 tobj = "3.2.1"
 tokio = { version = "1.17.0", features = ["full"] }
+tracing = "0.1.32"
+tracing-subscriber = "0.3.10"
 wgpu = "0.12.0"
 winit = "0.26.1"

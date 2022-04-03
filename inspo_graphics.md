@@ -1,3 +1,4 @@
 - Ape Escape
 - Devil Daggers
+- Gauntlet: Dark Legacy
 - Kirby 64

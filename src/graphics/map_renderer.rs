@@ -51,8 +51,8 @@ use wgpu::util::BufferInitDescriptor;
 use wgpu::util::DeviceExt;
 use wgpu::vertex_attr_array;
 
-use crate::graphics::DEPTH_FORMAT;
-use crate::graphics::Globals;
+use super::DEPTH_FORMAT;
+use super::Globals;
 
 #[allow(dead_code)]
 pub struct MapRenderer {
@@ -68,7 +68,7 @@ pub struct MapRenderer {
 
 impl MapRenderer {
     pub fn new(rc: &RenderingContext, globals: &Buffer, map: &Map<'_>) -> Self {
-        let shader = rc.device.create_shader_module(&include_wgsl!("map.wgsl"));
+        let shader = rc.device.create_shader_module(&include_wgsl!("shaders/map.wgsl"));
 
         let bind_group_layout = rc.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("MapRenderer::bind_group_layout"),

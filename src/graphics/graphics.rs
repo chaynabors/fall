@@ -1,5 +1,3 @@
-use bytemuck::Pod;
-use bytemuck::Zeroable;
 use mappy::Map;
 use rendering_util::RenderingContext;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -19,39 +17,15 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::camera::Camera;
-use crate::ecs::Resolution;
+use crate::components::Resolution;
 use crate::error::Error;
-use crate::map_renderer::MapRenderer;
-use crate::model::Model;
-use crate::model_renderer::Instance;
-use crate::model_renderer::ModelRenderer;
 
-pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct Globals {
-    proj: [[f32; 4]; 4],
-    proj_inv: [[f32; 4]; 4],
-    view: [[f32; 4]; 4],
-    view_proj: [[f32; 4]; 4],
-    cam_pos: [f32; 4],
-}
-
-impl Globals {
-    pub fn from_camera(camera: &Camera, width: u32, height: u32) -> Self {
-        let projection = camera.projection(width, height);
-        let view = camera.view().to_homogeneous();
-
-        Self {
-            proj: projection.into(),
-            proj_inv: projection.try_inverse().unwrap().into(),
-            view: view.into(),
-            view_proj: (projection * view).into(),
-            cam_pos: camera.position.to_homogeneous().into(),
-        }
-    }
-}
+use super::DEPTH_FORMAT;
+use super::Globals;
+use super::Instance;
+use super::MapRenderer;
+use super::Model;
+use super::ModelRenderer;
 
 pub struct Graphics {
     rendering_context: RenderingContext,
@@ -61,6 +35,8 @@ pub struct Graphics {
     globals: Buffer,
     map_renderer: MapRenderer,
     model_renderer: ModelRenderer,
+    textures: Vec<Texture>,
+    texture_views: Vec<TextureView>,
 }
 
 impl Graphics {
@@ -97,6 +73,8 @@ impl Graphics {
             globals,
             map_renderer,
             model_renderer,
+            textures: vec![],
+            texture_views: vec![],
         })
     }
 
@@ -132,6 +110,28 @@ impl Graphics {
         })?;
 
         Ok(())
+    }
+
+    pub fn load_texture(&mut self, texture: &super::Texture) {
+        let rc = &self.rendering_context;
+        let texture = rc.device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: texture.resolution.width,
+                height: texture.resolution.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING,
+        });
+
+        let view = texture.create_view(&TextureViewDescriptor::default());
+
+        self.textures.push(texture);
+        self.texture_views.push(view);
     }
 }
 

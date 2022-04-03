@@ -1,7 +1,3 @@
-use bytemuck::Pod;
-use bytemuck::Zeroable;
-use nalgebra::Matrix3;
-use nalgebra::Matrix4;
 use rendering_util::RenderingContext;
 use wgpu::BindGroup;
 use wgpu::BindGroupDescriptor;
@@ -12,7 +8,6 @@ use wgpu::BindGroupLayoutEntry;
 use wgpu::BindingType;
 use wgpu::BlendState;
 use wgpu::Buffer;
-use wgpu::BufferAddress;
 use wgpu::BufferBindingType;
 use wgpu::BufferDescriptor;
 use wgpu::BufferSize;
@@ -44,70 +39,14 @@ use wgpu::ShaderModule;
 use wgpu::ShaderStages;
 use wgpu::StencilState;
 use wgpu::TextureView;
-use wgpu::VertexAttribute;
-use wgpu::VertexBufferLayout;
-use wgpu::VertexFormat;
 use wgpu::VertexState;
-use wgpu::VertexStepMode;
 use wgpu::include_wgsl;
 
-use crate::graphics::DEPTH_FORMAT;
-use crate::graphics::Globals;
-use crate::model::Model;
-use crate::model::Vertex;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Pod, Zeroable)]
-pub struct Instance {
-    pub model: Matrix4<f32>,
-    pub normal: Matrix3<f32>,
-}
-
-impl Instance {
-    pub fn descriptor<'a>() -> VertexBufferLayout<'a> {
-        VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as BufferAddress,
-            step_mode: VertexStepMode::Instance,
-            attributes: &[
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: 0,
-                    shader_location: 3,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 4]>() as BufferAddress,
-                    shader_location: 4,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 8]>() as BufferAddress,
-                    shader_location: 5,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 12]>() as BufferAddress,
-                    shader_location: 6,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 16]>() as BufferAddress,
-                    shader_location: 7,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 19]>() as BufferAddress,
-                    shader_location: 8,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 22]>() as BufferAddress,
-                    shader_location: 9,
-                },
-            ]
-        }
-    }
-}
+use super::DEPTH_FORMAT;
+use super::Globals;
+use super::Instance;
+use super::Model;
+use super::Vertex;
 
 #[allow(dead_code)]
 pub struct ModelRenderer {
@@ -124,7 +63,7 @@ pub struct ModelRenderer {
 
 impl ModelRenderer {
     pub fn new(rc: &RenderingContext, globals: &Buffer, models: &[Model]) -> Self {
-        let shader = rc.device.create_shader_module(&include_wgsl!("model.wgsl"));
+        let shader = rc.device.create_shader_module(&include_wgsl!("shaders/model.wgsl"));
 
         let bind_group_layout = rc.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("ModelRenderer::bind_group_layout"),
